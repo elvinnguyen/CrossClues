@@ -1,8 +1,17 @@
 const COLUMN_LABELS = ['A', 'B', 'C', 'D', 'E'];
 const ROW_LABELS = ['1', '2', '3', '4', '5'];
 
-const COLUMN_CATEGORIES = ['Animal', 'Color', 'Country', 'Sport', 'Food'];
-const ROW_CATEGORIES = ['Hot', 'Fast', 'Big', 'Old', 'Soft'];
+const CATEGORY_POOL_A = [
+  'Animal', 'Color', 'Country', 'Sport', 'Food',
+  'Movie', 'Music', 'Weather', 'Clothing', 'Vehicle',
+  'Fruit', 'Drink', 'Tool', 'Planet', 'Language',
+];
+
+const CATEGORY_POOL_B = [
+  'Hot', 'Fast', 'Big', 'Old', 'Soft',
+  'Loud', 'Heavy', 'Sharp', 'Sweet', 'Dark',
+  'Round', 'Wet', 'Cold', 'Tiny', 'Strong',
+];
 
 function shuffle(array) {
   const arr = [...array];
@@ -11,6 +20,10 @@ function shuffle(array) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+function pickRandom(pool, count) {
+  return shuffle(pool).slice(0, count);
 }
 
 function buildDeck() {
@@ -39,16 +52,20 @@ export function createRoom(roomId) {
     players: [],
     turnIndex: 0,
     grid: buildGrid(),
-    columnCategories: COLUMN_CATEGORIES,
-    rowCategories: ROW_CATEGORIES,
+    columnCategories: pickRandom(CATEGORY_POOL_A, 5),
+    rowCategories: pickRandom(CATEGORY_POOL_B, 5),
     columnLabels: COLUMN_LABELS,
     rowLabels: ROW_LABELS,
     deck: buildDeck(),
     discardPile: [],
     usedClues: [],
     currentCard: null,
-    phase: 'lobby', // lobby | clue | guess | ended
+    currentClue: null,
+    phase: 'lobby',
     revealedCount: 0,
+    votes: {},
+    chatMessages: [],
+    lastGuessResult: null,
   };
 }
 
@@ -60,6 +77,8 @@ export function drawCard(room) {
   if (room.deck.length === 0) return null;
   const card = room.deck.pop();
   room.currentCard = card;
+  room.currentClue = null;
+  room.votes = {};
   room.phase = 'clue';
   return card;
 }
@@ -76,8 +95,37 @@ export function submitClue(room, clue) {
     return { ok: false, reason: 'Clue cannot be empty' };
   }
   room.usedClues.push(normalized);
+  room.currentClue = normalized;
+  room.votes = {};
   room.phase = 'guess';
   return { ok: true, clue: normalized };
+}
+
+export function submitVote(room, playerId, cell) {
+  room.votes[playerId] = cell;
+}
+
+export function allVotesIn(room) {
+  const active = getActivePlayer(room);
+  const voters = room.players.filter((p) => p.id !== active.id);
+  if (voters.length === 0) return false;
+  return voters.every((p) => room.votes[p.id] !== undefined);
+}
+
+export function tallyVotes(room) {
+  const counts = {};
+  for (const cell of Object.values(room.votes)) {
+    counts[cell] = (counts[cell] || 0) + 1;
+  }
+  let maxCell = null;
+  let maxCount = 0;
+  for (const [cell, count] of Object.entries(counts)) {
+    if (count > maxCount) {
+      maxCount = count;
+      maxCell = cell;
+    }
+  }
+  return maxCell;
 }
 
 export function resolveGuess(room, guessCell) {
@@ -88,7 +136,9 @@ export function resolveGuess(room, guessCell) {
   } else {
     room.discardPile.push(room.currentCard);
   }
+  room.lastGuessResult = { cell: guessCell, correct };
   room.currentCard = null;
+  room.votes = {};
   return correct;
 }
 
@@ -98,16 +148,21 @@ export function advanceTurn(room) {
     room.phase = 'ended';
     return true;
   }
-  room.phase = 'clue';
   return false;
 }
 
 export function getPublicState(room, includeCard = false) {
+  const active = getActivePlayer(room);
+  const voterCount = room.players.length > 0 ? room.players.length - 1 : 0;
+  const votedCount = Object.keys(room.votes).length;
+
   return {
     roomId: room.roomId,
     players: room.players.map((p) => p.name),
+    playerIds: room.players.map((p) => p.id),
     turnIndex: room.turnIndex,
-    activePlayer: getActivePlayer(room)?.name ?? null,
+    activePlayer: active?.name ?? null,
+    activePlayerId: active?.id ?? null,
     grid: room.grid,
     columnCategories: room.columnCategories,
     rowCategories: room.rowCategories,
@@ -117,7 +172,12 @@ export function getPublicState(room, includeCard = false) {
     discardCount: room.discardPile.length,
     usedClues: room.usedClues,
     currentCard: includeCard ? room.currentCard : null,
+    currentClue: room.currentClue,
     phase: room.phase,
     revealedCount: room.revealedCount,
+    votedCount,
+    voterCount,
+    lastGuessResult: room.lastGuessResult,
+    chatMessages: room.chatMessages.slice(-50),
   };
 }

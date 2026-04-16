@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import socket from './socket.js';
 import Lobby from './Lobby.jsx';
 import Game from './Game.jsx';
@@ -8,33 +8,23 @@ export default function App() {
   const [roomId, setRoomId] = useState(null);
   const [playerName, setPlayerName] = useState('');
   const [gameState, setGameState] = useState(null);
-  const [myCard, setMyCard] = useState(null);
-  const [lastClue, setLastClue] = useState(null);
-  const [lastGuessResult, setLastGuessResult] = useState(null);
-  const [gameEnd, setGameEnd] = useState(null);
   const [notification, setNotification] = useState(null);
+  const [guessResult, setGuessResult] = useState(null);
+
+  const prevGuessRef = useRef(null);
+  const guessTimerRef = useRef(null);
 
   useEffect(() => {
     socket.on('game_state', (state) => {
       setGameState(state);
-    });
 
-    socket.on('your_card', ({ card }) => {
-      setMyCard(card);
-    });
-
-    socket.on('clue_given', ({ clue, by }) => {
-      setLastClue({ clue, by });
-      setMyCard(null);
-    });
-
-    socket.on('guess_result', (result) => {
-      setLastGuessResult(result);
-      setTimeout(() => setLastGuessResult(null), 3000);
-    });
-
-    socket.on('game_end', (data) => {
-      setGameEnd(data);
+      const r = state.lastGuessResult;
+      if (r && JSON.stringify(r) !== JSON.stringify(prevGuessRef.current)) {
+        prevGuessRef.current = r;
+        setGuessResult(r);
+        clearTimeout(guessTimerRef.current);
+        guessTimerRef.current = setTimeout(() => setGuessResult(null), 3000);
+      }
     });
 
     socket.on('player_left', ({ name }) => {
@@ -44,11 +34,8 @@ export default function App() {
 
     return () => {
       socket.off('game_state');
-      socket.off('your_card');
-      socket.off('clue_given');
-      socket.off('guess_result');
-      socket.off('game_end');
       socket.off('player_left');
+      clearTimeout(guessTimerRef.current);
     };
   }, []);
 
@@ -68,10 +55,7 @@ export default function App() {
       roomId={roomId}
       playerName={playerName}
       gameState={gameState}
-      myCard={myCard}
-      lastClue={lastClue}
-      lastGuessResult={lastGuessResult}
-      gameEnd={gameEnd}
+      guessResult={guessResult}
       notification={notification}
     />
   );

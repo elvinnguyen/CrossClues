@@ -1,15 +1,13 @@
 import { useState } from 'react';
 import socket from './socket.js';
 import Board from './Board.jsx';
+import ChatRoom from './ChatRoom.jsx';
 
 export default function Game({
   roomId,
   playerName,
   gameState,
-  myCard,
-  lastClue,
-  lastGuessResult,
-  gameEnd,
+  guessResult,
   notification,
 }) {
   const [clueInput, setClueInput] = useState('');
@@ -22,6 +20,9 @@ export default function Game({
   const isCluePhase = gameState.phase === 'clue';
   const isGuessPhase = gameState.phase === 'guess';
   const isEnded = gameState.phase === 'ended';
+  const myVote = gameState.myVote ?? null;
+  const currentClue = gameState.currentClue
+    || (gameState.usedClues.length > 0 ? gameState.usedClues[gameState.usedClues.length - 1] : null);
 
   function handleStartGame() {
     socket.emit('start_game', { roomId }, (res) => {
@@ -41,8 +42,8 @@ export default function Game({
     });
   }
 
-  function handleGuess(cell) {
-    socket.emit('make_guess', { roomId, cell }, (res) => {
+  function handleVote(cell) {
+    socket.emit('submit_vote', { roomId, cell }, (res) => {
       if (!res.ok) setError(res.reason);
       else setError('');
     });
@@ -74,6 +75,8 @@ export default function Game({
     );
   }
 
+  const wrongCell = guessResult && !guessResult.correct ? guessResult.cell : null;
+
   return (
     <div className="game">
       <div className="game-header">
@@ -83,12 +86,19 @@ export default function Game({
           <span className="score">Revealed: {gameState.revealedCount}/25</span>
         </div>
         <div className="turn-info">
-          {isEnded || gameEnd ? (
+          {isEnded ? (
             <span className="ended-label">Game Over</span>
+          ) : isGuessPhase ? (
+            <span>
+              {isMyTurn
+                ? 'Waiting for votes...'
+                : `Your turn to guess`}
+            </span>
           ) : (
             <span>
-              Turn: <strong>{gameState.activePlayer}</strong>
-              {isMyTurn && ' (you)'}
+              {isMyTurn
+                ? 'Your turn — give a clue!'
+                : <span>Waiting for <strong>{gameState.activePlayer}</strong>...</span>}
             </span>
           )}
         </div>
@@ -96,101 +106,139 @@ export default function Game({
 
       {notification && <div className="notification">{notification}</div>}
 
-      {lastGuessResult && (
-        <div className={`guess-banner ${lastGuessResult.correct ? 'correct' : 'wrong'}`}>
-          {lastGuessResult.correct
-            ? `Correct! ${lastGuessResult.cell} revealed!`
-            : `Wrong! The card was ${lastGuessResult.actualCard}, guessed ${lastGuessResult.cell}`}
+      {guessResult && (
+        <div className={`guess-banner ${guessResult.correct ? 'correct' : 'wrong'}`}>
+          {guessResult.correct
+            ? `Correct! ${guessResult.cell} revealed!`
+            : `Wrong guess: ${guessResult.cell}. The card was discarded.`}
         </div>
       )}
 
-      {(isEnded || gameEnd) && (
+      {isEnded && (
         <div className="game-over">
           <h2>Game Over!</h2>
           <p>
-            Your team revealed <strong>{gameEnd?.revealedCount ?? gameState.revealedCount}</strong> out of 25 cells.
+            Your team revealed <strong>{gameState.revealedCount}</strong> out of 25 cells.
           </p>
         </div>
       )}
 
-      <Board
-        gameState={gameState}
-        canGuess={isGuessPhase && !isMyTurn && !isEnded}
-        onGuess={handleGuess}
-      />
-
-      <div className="sidebar">
-        {isCluePhase && isMyTurn && myCard && (
-          <div className="clue-section">
-            <div className="your-card">
-              Your card: <strong>{myCard}</strong>
-              <span className="card-hint">
-                ({gameState.columnCategories[gameState.columnLabels.indexOf(myCard[0])]} +{' '}
-                {gameState.rowCategories[gameState.rowLabels.indexOf(myCard[1])]})
-              </span>
-            </div>
-            <div className="clue-input-row">
-              <input
-                type="text"
-                placeholder="Enter one-word clue..."
-                value={clueInput}
-                onChange={(e) => setClueInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSubmitClue()}
-              />
-              <button className="primary" onClick={handleSubmitClue}>
-                Submit
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isCluePhase && !isMyTurn && (
-          <div className="waiting-section">
-            Waiting for <strong>{gameState.activePlayer}</strong> to give a clue...
-          </div>
-        )}
-
-        {isGuessPhase && !isMyTurn && (
-          <div className="guess-section">
-            <p>
-              Clue: <strong className="clue-word">"{lastClue?.clue}"</strong> by {lastClue?.by}
-            </p>
-            <p>Click a cell on the board to guess!</p>
-          </div>
-        )}
-
-        {isGuessPhase && isMyTurn && (
-          <div className="waiting-section">
-            You gave the clue. Waiting for others to guess...
-          </div>
-        )}
-
-        {error && <p className="error">{error}</p>}
-
-        <div className="used-clues">
-          <h3>Used Clues</h3>
-          {gameState.usedClues.length === 0 ? (
-            <p className="muted">None yet</p>
-          ) : (
-            <div className="clue-list">
-              {gameState.usedClues.map((c, i) => (
-                <span key={i} className="clue-tag">{c}</span>
-              ))}
-            </div>
-          )}
+      <div className="game-body">
+        <div className="col-board">
+          <Board
+            gameState={gameState}
+            canVote={isGuessPhase && !isMyTurn && !isEnded}
+            myVote={myVote}
+            onVote={handleVote}
+            wrongCell={wrongCell}
+          />
         </div>
 
-        <div className="players-sidebar">
-          <h3>Players</h3>
-          {gameState.players.map((p, i) => (
-            <div
-              key={p}
-              className={`player-row ${i === gameState.turnIndex && !isEnded ? 'active' : ''} ${p === playerName ? 'me' : ''}`}
-            >
-              {i === gameState.turnIndex && !isEnded && <span className="turn-dot" />}
-              {p} {p === playerName && '(you)'}
+        <div className="col-middle">
+          {isCluePhase && isMyTurn && gameState.currentCard && (
+            <div className="clue-section">
+              <div className="your-card">
+                Your card: <strong>{gameState.currentCard}</strong>
+                <span className="card-hint">
+                  ({gameState.columnCategories[gameState.columnLabels.indexOf(gameState.currentCard[0])]} +{' '}
+                  {gameState.rowCategories[gameState.rowLabels.indexOf(gameState.currentCard[1])]})
+                </span>
+              </div>
+              <div className="clue-input-row">
+                <input
+                  type="text"
+                  placeholder="Enter one-word clue..."
+                  value={clueInput}
+                  onChange={(e) => setClueInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitClue()}
+                />
+                <button className="primary" onClick={handleSubmitClue}>
+                  Submit
+                </button>
+              </div>
             </div>
-          ))}
+          )}
+
+          {isCluePhase && !isMyTurn && (
+            <div className="waiting-section">
+              Waiting for <strong>{gameState.activePlayer}</strong> to give a clue...
+            </div>
+          )}
+
+          {isGuessPhase && !isMyTurn && (
+            <div className="guess-section">
+              <p>
+                <strong>{gameState.activePlayer}</strong> says: <strong className="clue-word">"{currentClue}"</strong>
+              </p>
+              {!myVote ? (
+                <p>Click a cell on the board to vote!</p>
+              ) : (
+                <p>
+                  You voted: <strong>{myVote}</strong>. Waiting for others...
+                </p>
+              )}
+              <div className="vote-progress">
+                <span className="vote-count">{gameState.votedCount}/{gameState.voterCount} voted</span>
+                <div className="vote-bar">
+                  <div
+                    className="vote-fill"
+                    style={{ width: `${gameState.voterCount > 0 ? (gameState.votedCount / gameState.voterCount) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isGuessPhase && isMyTurn && (
+            <div className="waiting-section">
+              <p>You gave the clue <strong className="clue-word">"{currentClue}"</strong>. Waiting for others to vote...</p>
+              <div className="vote-progress">
+                <span className="vote-count">{gameState.votedCount}/{gameState.voterCount} voted</span>
+                <div className="vote-bar">
+                  <div
+                    className="vote-fill"
+                    style={{ width: `${gameState.voterCount > 0 ? (gameState.votedCount / gameState.voterCount) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="error">{error}</p>}
+
+          <div className="used-clues">
+            <h3>Used Clues</h3>
+            {gameState.usedClues.length === 0 ? (
+              <p className="muted">None yet</p>
+            ) : (
+              <div className="clue-list">
+                {gameState.usedClues.map((c, i) => (
+                  <span key={i} className="clue-tag">{c}</span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="players-sidebar">
+            <h3>Players</h3>
+            {gameState.players.map((p, i) => (
+              <div
+                key={p}
+                className={`player-row ${i === gameState.turnIndex && !isEnded ? 'active' : ''} ${p === playerName ? 'me' : ''}`}
+              >
+                {i === gameState.turnIndex && !isEnded && <span className="turn-dot" />}
+                {p} {p === playerName && '(you)'}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="col-chat">
+          <ChatRoom
+            roomId={roomId}
+            playerName={playerName}
+            messages={gameState.chatMessages ?? []}
+          />
         </div>
       </div>
     </div>

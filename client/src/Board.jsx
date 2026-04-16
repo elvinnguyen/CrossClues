@@ -1,4 +1,4 @@
-export default function Board({ gameState, canGuess, onGuess }) {
+export default function Board({ gameState, canVote, myVote, onVote, wrongCell }) {
   const { columnLabels, rowLabels, columnCategories, rowCategories, grid } = gameState;
 
   return (
@@ -25,12 +25,21 @@ export default function Board({ gameState, canGuess, onGuess }) {
               {columnLabels.map((col) => {
                 const cell = col + row;
                 const revealed = grid[cell]?.revealed;
+                const isMyVote = myVote === cell;
+                const isWrong = wrongCell === cell;
+                const clickable = canVote && !revealed && !myVote;
                 return (
                   <td
                     key={cell}
-                    className={`cell ${revealed ? 'revealed' : ''} ${canGuess && !revealed ? 'clickable' : ''}`}
+                    className={[
+                      'cell',
+                      revealed && 'revealed',
+                      clickable && 'clickable',
+                      isMyVote && 'voted',
+                      isWrong && 'wrong-flash',
+                    ].filter(Boolean).join(' ')}
                     onClick={() => {
-                      if (canGuess && !revealed) onGuess(cell);
+                      if (clickable) onVote(cell);
                     }}
                   >
                     {revealed ? (

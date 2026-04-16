@@ -7,6 +7,9 @@ import {
   getActivePlayer,
   drawCard,
   submitClue,
+  submitVote,
+  allVotesIn,
+  tallyVotes,
   resolveGuess,
   advanceTurn,
   getPublicState,
@@ -33,8 +36,25 @@ function broadcastState(room) {
   for (const player of room.players) {
     const isActive = getActivePlayer(room)?.id === player.id;
     const state = getPublicState(room, isActive);
+    state.myVote = room.votes[player.id] ?? null;
     io.to(player.id).emit('game_state', state);
   }
+}
+
+function handleVoteResolution(room, roomCode) {
+  if (!allVotesIn(room)) return;
+
+  const majorityCell = tallyVotes(room);
+  const correct = resolveGuess(room, majorityCell);
+
+  const ended = advanceTurn(room);
+  if (ended) {
+    broadcastState(room);
+    return;
+  }
+
+  drawCard(room);
+  broadcastState(room);
 }
 
 io.on('connection', (socket) => {
@@ -76,12 +96,10 @@ io.on('connection', (socket) => {
     if (room.players.length < 2) return cb({ ok: false, reason: 'Need at least 2 players' });
     if (room.phase !== 'lobby') return cb({ ok: false, reason: 'Game already started' });
 
-    room.phase = 'clue';
-    const card = drawCard(room);
+    drawCard(room);
     cb({ ok: true });
 
     broadcastState(room);
-    io.to(getActivePlayer(room).id).emit('your_card', { card });
   });
 
   socket.on('submit_clue', ({ roomId, clue }, cb) => {
@@ -95,34 +113,47 @@ io.on('connection', (socket) => {
     const result = submitClue(room, clue);
     if (!result.ok) return cb(result);
 
+    room.lastGuessResult = null;
     cb({ ok: true });
-    io.to(roomId).emit('clue_given', { clue: result.clue, by: active.name });
     broadcastState(room);
   });
 
-  socket.on('make_guess', ({ roomId, cell }, cb) => {
+  socket.on('submit_vote', ({ roomId, cell }, cb) => {
     const room = rooms[roomId];
     if (!room) return cb({ ok: false, reason: 'Room not found' });
 
     const active = getActivePlayer(room);
-    if (active.id === socket.id) return cb({ ok: false, reason: 'Active player cannot guess' });
+    if (active.id === socket.id) return cb({ ok: false, reason: 'Active player cannot vote' });
     if (room.phase !== 'guess') return cb({ ok: false, reason: 'Not in guess phase' });
+    if (room.votes[socket.id]) return cb({ ok: false, reason: 'Already voted' });
 
-    const correct = resolveGuess(room, cell);
-    io.to(roomId).emit('guess_result', { cell, correct, actualCard: correct ? cell : room.discardPile[room.discardPile.length - 1] });
+    submitVote(room, socket.id, cell);
+    cb({ ok: true });
+    broadcastState(room);
 
-    const ended = advanceTurn(room);
-    if (ended) {
-      io.to(roomId).emit('game_end', {
-        revealedCount: room.revealedCount,
-        total: 25,
-      });
-    } else {
-      const nextCard = drawCard(room);
-      io.to(getActivePlayer(room).id).emit('your_card', { card: nextCard });
-    }
+    handleVoteResolution(room, roomId);
+  });
 
-    cb({ ok: true, correct });
+  socket.on('send_chat_message', ({ roomId, message }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+
+    const text = message.trim().slice(0, 300);
+    if (!text) return;
+
+    const msg = {
+      id: Date.now() + '-' + socket.id,
+      sender: player.name,
+      text,
+      timestamp: Date.now(),
+    };
+
+    room.chatMessages.push(msg);
+    if (room.chatMessages.length > 200) room.chatMessages.shift();
+
     broadcastState(room);
   });
 
@@ -133,6 +164,7 @@ io.on('connection', (socket) => {
       if (idx !== -1) {
         const playerName = room.players[idx].name;
         room.players.splice(idx, 1);
+        delete room.votes[socket.id];
 
         if (room.players.length === 0) {
           delete rooms[code];
@@ -142,6 +174,10 @@ io.on('connection', (socket) => {
           }
           io.to(code).emit('player_left', { name: playerName });
           broadcastState(room);
+
+          if (room.phase === 'guess') {
+            handleVoteResolution(room, code);
+          }
         }
       }
     }
