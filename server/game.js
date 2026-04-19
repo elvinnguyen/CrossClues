@@ -46,27 +46,45 @@ function buildGrid() {
   return grid;
 }
 
-export function createRoom(roomId) {
+export function createRoom(roomId, hostId) {
   return {
     roomId,
+    hostId,
     players: [],
     turnIndex: 0,
     grid: buildGrid(),
-    columnCategories: pickRandom(CATEGORY_POOL_A, 5),
-    rowCategories: pickRandom(CATEGORY_POOL_B, 5),
+    columnCategories: [],
+    rowCategories: [],
     columnLabels: COLUMN_LABELS,
     rowLabels: ROW_LABELS,
-    deck: buildDeck(),
+    deck: [],
     discardPile: [],
     usedClues: [],
     currentCard: null,
     currentClue: null,
     phase: 'lobby',
     revealedCount: 0,
+    selections: {},
     votes: {},
     chatMessages: [],
     lastGuessResult: null,
   };
+}
+
+export function initializeGame(room) {
+  room.columnCategories = pickRandom(CATEGORY_POOL_A, 5);
+  room.rowCategories = pickRandom(CATEGORY_POOL_B, 5);
+  room.deck = buildDeck();
+  room.grid = buildGrid();
+  room.discardPile = [];
+  room.usedClues = [];
+  room.currentCard = null;
+  room.currentClue = null;
+  room.turnIndex = 0;
+  room.revealedCount = 0;
+  room.selections = {};
+  room.votes = {};
+  room.lastGuessResult = null;
 }
 
 export function getActivePlayer(room) {
@@ -78,6 +96,7 @@ export function drawCard(room) {
   const card = room.deck.pop();
   room.currentCard = card;
   room.currentClue = null;
+  room.selections = {};
   room.votes = {};
   room.phase = 'clue';
   return card;
@@ -96,13 +115,19 @@ export function submitClue(room, clue) {
   }
   room.usedClues.push(normalized);
   room.currentClue = normalized;
+  room.selections = {};
   room.votes = {};
   room.phase = 'guess';
   return { ok: true, clue: normalized };
 }
 
+export function selectCell(room, playerId, cell) {
+  room.selections[playerId] = cell;
+}
+
 export function submitVote(room, playerId, cell) {
   room.votes[playerId] = cell;
+  delete room.selections[playerId];
 }
 
 export function allVotesIn(room) {
@@ -138,6 +163,7 @@ export function resolveGuess(room, guessCell) {
   }
   room.lastGuessResult = { cell: guessCell, correct };
   room.currentCard = null;
+  room.selections = {};
   room.votes = {};
   return correct;
 }
@@ -156,10 +182,28 @@ export function getPublicState(room, includeCard = false) {
   const voterCount = room.players.length > 0 ? room.players.length - 1 : 0;
   const votedCount = Object.keys(room.votes).length;
 
+  const playerNameById = {};
+  for (const p of room.players) playerNameById[p.id] = p.name;
+
+  const selections = {};
+  for (const [id, cell] of Object.entries(room.selections)) {
+    selections[id] = { name: playerNameById[id], cell };
+  }
+
+  const playerVotes = Object.entries(room.votes).map(([id, cell]) => ({
+    id,
+    name: playerNameById[id],
+    cell,
+  }));
+
   return {
     roomId: room.roomId,
-    players: room.players.map((p) => p.name),
-    playerIds: room.players.map((p) => p.id),
+    hostId: room.hostId,
+    players: room.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      isReady: p.isReady,
+    })),
     turnIndex: room.turnIndex,
     activePlayer: active?.name ?? null,
     activePlayerId: active?.id ?? null,
@@ -177,6 +221,8 @@ export function getPublicState(room, includeCard = false) {
     revealedCount: room.revealedCount,
     votedCount,
     voterCount,
+    selections,
+    playerVotes,
     lastGuessResult: room.lastGuessResult,
     chatMessages: room.chatMessages.slice(-50),
   };

@@ -4,9 +4,11 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import {
   createRoom,
+  initializeGame,
   getActivePlayer,
   drawCard,
   submitClue,
+  selectCell,
   submitVote,
   allVotesIn,
   tallyVotes,
@@ -37,15 +39,16 @@ function broadcastState(room) {
     const isActive = getActivePlayer(room)?.id === player.id;
     const state = getPublicState(room, isActive);
     state.myVote = room.votes[player.id] ?? null;
+    state.mySelection = room.selections[player.id] ?? null;
     io.to(player.id).emit('game_state', state);
   }
 }
 
-function handleVoteResolution(room, roomCode) {
+function handleVoteResolution(room) {
   if (!allVotesIn(room)) return;
 
   const majorityCell = tallyVotes(room);
-  const correct = resolveGuess(room, majorityCell);
+  resolveGuess(room, majorityCell);
 
   const ended = advanceTurn(room);
   if (ended) {
@@ -64,8 +67,8 @@ io.on('connection', (socket) => {
     let code = generateRoomCode();
     while (rooms[code]) code = generateRoomCode();
 
-    const room = createRoom(code);
-    room.players.push({ id: socket.id, name: playerName });
+    const room = createRoom(code, socket.id);
+    room.players.push({ id: socket.id, name: playerName, isReady: false });
     rooms[code] = room;
     socket.join(code);
 
@@ -83,22 +86,38 @@ io.on('connection', (socket) => {
     if (room.players.some((p) => p.name === playerName))
       return cb({ ok: false, reason: 'Name already taken' });
 
-    room.players.push({ id: socket.id, name: playerName });
+    room.players.push({ id: socket.id, name: playerName, isReady: false });
     socket.join(code);
 
     cb({ ok: true, roomId: code });
     broadcastState(room);
   });
 
+  socket.on('toggle_ready', ({ roomId }, cb) => {
+    const room = rooms[roomId];
+    if (!room) return cb({ ok: false, reason: 'Room not found' });
+    if (room.phase !== 'lobby') return cb({ ok: false, reason: 'Game already started' });
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return cb({ ok: false, reason: 'Player not found' });
+
+    player.isReady = !player.isReady;
+    cb({ ok: true, isReady: player.isReady });
+    broadcastState(room);
+  });
+
   socket.on('start_game', ({ roomId }, cb) => {
     const room = rooms[roomId];
     if (!room) return cb({ ok: false, reason: 'Room not found' });
-    if (room.players.length < 2) return cb({ ok: false, reason: 'Need at least 2 players' });
     if (room.phase !== 'lobby') return cb({ ok: false, reason: 'Game already started' });
+    if (socket.id !== room.hostId) return cb({ ok: false, reason: 'Only the host can start the game' });
+    if (room.players.length < 2) return cb({ ok: false, reason: 'Need at least 2 players' });
+    if (!room.players.every((p) => p.id === room.hostId || p.isReady))
+      return cb({ ok: false, reason: 'All players must be ready' });
 
+    initializeGame(room);
     drawCard(room);
     cb({ ok: true });
-
     broadcastState(room);
   });
 
@@ -118,6 +137,20 @@ io.on('connection', (socket) => {
     broadcastState(room);
   });
 
+  socket.on('select_cell', ({ roomId, cell }, cb) => {
+    const room = rooms[roomId];
+    if (!room) return cb({ ok: false, reason: 'Room not found' });
+
+    const active = getActivePlayer(room);
+    if (active.id === socket.id) return cb({ ok: false, reason: 'Active player cannot select' });
+    if (room.phase !== 'guess') return cb({ ok: false, reason: 'Not in guess phase' });
+    if (room.votes[socket.id]) return cb({ ok: false, reason: 'Already voted' });
+
+    selectCell(room, socket.id, cell);
+    cb({ ok: true });
+    broadcastState(room);
+  });
+
   socket.on('submit_vote', ({ roomId, cell }, cb) => {
     const room = rooms[roomId];
     if (!room) return cb({ ok: false, reason: 'Room not found' });
@@ -127,11 +160,14 @@ io.on('connection', (socket) => {
     if (room.phase !== 'guess') return cb({ ok: false, reason: 'Not in guess phase' });
     if (room.votes[socket.id]) return cb({ ok: false, reason: 'Already voted' });
 
-    submitVote(room, socket.id, cell);
+    const voteCell = cell || room.selections[socket.id];
+    if (!voteCell) return cb({ ok: false, reason: 'No cell selected' });
+
+    submitVote(room, socket.id, voteCell);
     cb({ ok: true });
     broadcastState(room);
 
-    handleVoteResolution(room, roomId);
+    handleVoteResolution(room);
   });
 
   socket.on('send_chat_message', ({ roomId, message }) => {
@@ -165,10 +201,15 @@ io.on('connection', (socket) => {
         const playerName = room.players[idx].name;
         room.players.splice(idx, 1);
         delete room.votes[socket.id];
+        delete room.selections[socket.id];
 
         if (room.players.length === 0) {
           delete rooms[code];
         } else {
+          if (room.hostId === socket.id) {
+            room.hostId = room.players[0].id;
+          }
+
           if (room.turnIndex >= room.players.length) {
             room.turnIndex = 0;
           }
@@ -176,7 +217,7 @@ io.on('connection', (socket) => {
           broadcastState(room);
 
           if (room.phase === 'guess') {
-            handleVoteResolution(room, code);
+            handleVoteResolution(room);
           }
         }
       }
