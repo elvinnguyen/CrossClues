@@ -4,14 +4,15 @@ import socket from './socket.js';
 export default function ChatRoom({ roomId, playerName, messages }) {
   const [input, setInput] = useState('');
   const listRef = useRef(null);
-  const prevLenRef = useRef(0);
 
   useEffect(() => {
-    if (messages.length > prevLenRef.current && listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
+    if (listRef.current) {
+      const el = listRef.current;
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+      });
     }
-    prevLenRef.current = messages.length;
-  }, [messages.length]);
+  }, [messages]);
 
   function handleSend() {
     const text = input.trim();

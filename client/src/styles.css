@@ -300,6 +300,9 @@ button.primary:disabled {
   min-width: 0;
   overflow: auto;
   padding-right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Middle column — Clue/Guess/Players (~22%) */
@@ -330,7 +333,7 @@ button.primary:disabled {
 }
 .board {
   border-collapse: separate;
-  border-spacing: 4px;
+  border-spacing: 6px;
 }
 .board th,
 .board td {
@@ -338,23 +341,23 @@ button.primary:disabled {
   vertical-align: middle;
 }
 .corner {
-  width: 72px;
+  width: 90px;
 }
 .col-header,
 .row-header {
-  padding: 6px 4px;
+  padding: 8px 6px;
 }
 .col-header .label,
 .row-header .label {
   display: block;
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
   color: #e1e4e8;
 }
 .col-header .category,
 .row-header .category {
   display: block;
-  font-size: 11px;
+  font-size: 13px;
   color: #2563eb;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -362,21 +365,21 @@ button.primary:disabled {
 }
 .row-header {
   text-align: right;
-  padding-right: 10px;
+  padding-right: 12px;
 }
 
 .cell {
-  width: 72px;
-  height: 60px;
+  width: 100px;
+  height: 80px;
   background: #1c1f26;
-  border: 1px solid #2a2d36;
-  border-radius: 8px;
+  border: 2px solid #2a2d36;
+  border-radius: 10px;
   transition: all 0.15s;
   cursor: default;
   position: relative;
 }
 .cell .cell-empty {
-  font-size: 13px;
+  font-size: 15px;
   color: #444;
 }
 .cell.revealed {
@@ -384,7 +387,7 @@ button.primary:disabled {
   border-color: #34d399;
 }
 .cell.revealed .cell-label {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   color: #34d399;
 }
@@ -430,20 +433,20 @@ button.primary:disabled {
 
 .cell-indicators {
   position: absolute;
-  bottom: 2px;
-  left: 2px;
-  right: 2px;
+  bottom: 4px;
+  left: 4px;
+  right: 4px;
   display: flex;
-  gap: 2px;
+  gap: 3px;
   justify-content: center;
   flex-wrap: wrap;
   pointer-events: none;
 }
 .indicator {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   display: flex;
   align-items: center;
